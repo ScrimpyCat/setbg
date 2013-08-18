@@ -317,7 +317,7 @@ int main(int argc, char *argv[])
             }
             
             //help
-            else if (!strcmp(Command, "--help"))
+            else if ((!strcmp(Command, "--help")) || (!strcmp(Command, "-h")))
             {
                 printf("Commands:\n"
                        "\t-i path = image input\n"
