@@ -142,7 +142,7 @@ int main(int argc, char *argv[])
                 {
                     NSString *Option = @(argv[Loop]);
                     
-                    if ((![Option isAbsolutePath]) || ([[NSImage imageFileTypes] indexOfObject: [Option pathExtension]] == NSNotFound))
+                    if ((![[NSFileManager defaultManager] fileExistsAtPath: Option]) || ([[NSImage imageFileTypes] indexOfObject: [Option pathExtension]] == NSNotFound))
                     {
                         fprintf(stderr, "Failed to open the image at: %s.\n", argv[Loop]);
                         return EXIT_FAILURE;
