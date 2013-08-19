@@ -25,6 +25,9 @@ setbg -i img1.png -isset 16 16 -offbl (Sets the background to img1.png sized at 
 setbg -i img1.png -t 2 -i img2.png -t 2 -i img3.png -t 2 -r (Sets the background to img1.png for 2 seconds, then to img2.png for 2 seconds, then to img3.png for 2 seconds, then back to img1.png for 2 seconds, etc.)
 
 
+When changing the resolution you will want to set the background again. If adding or removing screens you will want to kill setbg and restart it.
+
+
 
 To-Do's
 -------
