@@ -25,7 +25,7 @@
 
 /*
  Compile:
- clang setbg.m -o setbg -framework Cocoa
+ clang setbg.m -o setbg -framework Cocoa -framework Quartz
  
  Commands:
  -i path = image input
@@ -39,9 +39,9 @@
         -offtl = offsets from the top left
         -offtr = offsets from the top right
     -tiled = the image is tiled to fill the screen
- -p path = plugin input
-    -pr number = the interval the plugin should be recalled
- -t number = time the operation should last for (note: it does not guarantee any high degree of accuracy, if you do need that you're better off handling that in a plugin)
+ -c path = quartz composition input
+    -cr number = the interval the composition should be recalled
+ -t number = time the operation should last for (note: it does not guarantee any high degree of accuracy, if you do need that you're better off handling that in a plugin/composition)
  -r = repeat the operations once it reaches the end
  -rr = reverse repeat, does the same as repeat except will reverse the order of operations each time it reaches the end
  -kill = conveniently kills the daemon and exits
@@ -58,6 +58,7 @@
  setbg -i img1.png -t 2 -i img2.png -t 2 -i img3.png -t 2 -r (Sets the background to img1.png for 2 seconds, then to img2.png for 2 seconds, then to img3.png for 2 seconds, then back to img1.png for 2 seconds, etc.)
  */
 #import <Cocoa/Cocoa.h>
+#import <Quartz/Quartz.h>
 
 #define SBGConnectionName @"setbgd" //Should we use reverse-DNS style naming?
 #define SBGAllScreens nil 
@@ -138,6 +139,20 @@ typedef enum {
 
 @end
 
+@interface SBGComposition : NSObject <SBGData, SBGDrawingOperation, NSCoding>
+
+@property NSTimeInterval refreshRate;
+
+-(instancetype) initWithCompositionAtPath: (NSString*)path;
+
+@end
+
+@interface SBGCompositionView : QCView <SBGDrawingOperation>
+
+-(instancetype) initWithCompositionAtPath: (NSString*)path WithRefreshRate: (NSTimeInterval)refreshRate;
+
+@end
+
 
 int main(int argc, char *argv[])
 {
@@ -180,16 +195,24 @@ int main(int argc, char *argv[])
                 }
             }
             
-            else if (!strcmp(Command, "-p")) //Plugin input
+            else if (!strcmp(Command, "-c")) //Quartz Composition input
             {
                 if (++Loop < argc)
                 {
-                    const char *Option = argv[Loop];
+                    NSString *Option = @(argv[Loop]);
+                    
+                    if ((![[NSFileManager defaultManager] fileExistsAtPath: Option]) || (![[Option pathExtension] isEqualToString: @"qtz"]))
+                    {
+                        fprintf(stderr, "Failed to open the composition at: %s.\n", argv[Loop]);
+                        return EXIT_FAILURE;
+                    }
+                    
+                    [DrawOperations addObject: [[[SBGComposition alloc] initWithCompositionAtPath: Option] autorelease]];
                 }
                 
                 else
                 {
-                    fprintf(stderr, "Missing plugin path.\n");
+                    fprintf(stderr, "Missing composition path.\n");
                     return EXIT_FAILURE;
                 }
             }
@@ -324,11 +347,19 @@ int main(int argc, char *argv[])
                 ((SBGImage*)CurrentOperation).drawingOption = (((SBGImage*)CurrentOperation).drawingOption & ~SBGDrawOperationTypeMask) | SBGDrawOperationTypeTile;
             }
             
-            else if (!strcmp(Command, "-pr")) //Plugin refresh rate option
+            else if (!strcmp(Command, "-cr")) //Composition refresh rate option
             {
+                id<NSObject, SBGDrawingOperation> CurrentOperation = [DrawOperations lastObject];
+                if (![CurrentOperation isKindOfClass: [SBGComposition class]])
+                {
+                    fprintf(stderr, "Invalid option for type: %s.\n", [[[CurrentOperation class] description] UTF8String]);
+                    return EXIT_FAILURE;
+                }
+                
+                
                 if (++Loop < argc)
                 {
-                    const char *Option = argv[Loop];
+                    ((SBGComposition*)CurrentOperation).refreshRate = [@(argv[Loop]) doubleValue];
                 }
                 
                 else
@@ -353,9 +384,9 @@ int main(int argc, char *argv[])
                        "\t\t\t-offtl = offsets from the top left\n"
                        "\t\t\t-offtr = offsets from the top right\n"
                        "\t\t-tiled = the image is tiled to fill the screen\n"
-                       "\t-p path = plugin input\n"
-                       "\t\t-pr number = the interval the plugin should be recalled\n"
-                       "\t-t number = time the operation should last for (note: it does not guarantee any high degree of accuracy, if you do need that you're better off handling that in a plugin)\n"
+                       "\t-c path = quartz composition input\n"
+                       "\t\t-cr number = the interval the composition should be recalled\n"
+                       "\t-t number = time the operation should last for (note: it does not guarantee any high degree of accuracy, if you do need that you're better off handling that in a plugin/composition)\n"
                        "\t-r = repeat the operations once it reaches the end\n"
                        "\t-rr = reverse repeat, does the same as repeat except will reverse the order of operations each time it reaches the end\n"
                        "\t-kill = conveniently kills the daemon and exits\n"
@@ -776,6 +807,66 @@ static OSSpinLock FocusOnAppLock = OS_SPINLOCK_INIT;
 @end
 
 
+
+@implementation SBGComposition
+{
+    NSString *compositionPath;
+}
+@synthesize time, refreshRate;
+
+-(instancetype) initWithCompositionAtPath: (NSString*)path
+{
+    if ((self = [super init]))
+    {
+        compositionPath = [path retain];
+        refreshRate = 1.0 / 30.0; //default as 30 fps
+    }
+    
+    return self;
+}
+
+-(id) replacementObjectForPortCoder: (NSPortCoder*)encoder
+{
+    return self;
+}
+
+-(id) initWithCoder: (NSCoder*)decoder
+{
+    if ((self = [super init]))
+    {
+        time = [[decoder decodeObject] retain];
+        compositionPath = [[decoder decodeObject] retain];
+        [decoder decodeValueOfObjCType: @encode(NSTimeInterval) at: &refreshRate];
+    }
+    
+    return self;
+}
+
+-(void) encodeWithCoder: (NSCoder*)encoder
+{
+    [encoder encodeBycopyObject: self.time];
+    [encoder encodeBycopyObject: compositionPath];
+    [encoder encodeValueOfObjCType: @encode(NSTimeInterval) at: &refreshRate];
+}
+
+-(NSView<SBGDrawingOperation>*) view
+{
+    SBGCompositionView *CompositionView = [[[SBGCompositionView alloc] initWithCompositionAtPath: compositionPath WithRefreshRate: self.refreshRate] autorelease];
+    CompositionView.time = self.time;
+    
+    return CompositionView;
+}
+
+-(void) dealloc
+{
+    [compositionPath release]; compositionPath = nil;
+    
+    [super dealloc];
+}
+
+@end
+
+
 #pragma mark - Views
 @interface SBGImageView ()
 
@@ -981,6 +1072,32 @@ static OSSpinLock FocusOnAppLock = OS_SPINLOCK_INIT;
     [imagePath release]; imagePath = nil;
     [time release]; time = nil;
     CGImageRelease(cachedImage); cachedImage = NULL;
+    
+    [super dealloc];
+}
+
+@end
+
+
+
+@implementation SBGCompositionView
+@synthesize time;
+
+-(instancetype) initWithCompositionAtPath: (NSString*)path WithRefreshRate: (NSTimeInterval)refreshRate
+{
+    if ((self = [super init]))
+    {
+        [self loadCompositionFromFile: path];
+        [self setMaxRenderingFrameRate: 1.0 / refreshRate];
+        [self setAutostartsRendering: YES];
+    }
+    
+    return self;
+}
+
+-(void) dealloc
+{
+    [time release]; time = nil;
     
     [super dealloc];
 }
