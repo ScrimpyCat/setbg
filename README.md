@@ -13,7 +13,7 @@ Other than visual options, it also allows for the focus to be set to a particula
 
 Usage:
 ------
-Use --help to get a list of commands. Will add the commands here later.
+Use --help or -h to get a list of commands. Will add the commands here later.
 
 Some examples:
 The order of commands can be thought of as as sequence of operations. Where the last set operation can then have additional options to define its usage.

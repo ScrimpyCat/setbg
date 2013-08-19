@@ -373,7 +373,7 @@ int main(int argc, char *argv[])
             
             else
             {
-                fprintf(stderr, "\"%s\" is not a valid command. For a list of commands use the option: --help.\n", Command);
+                fprintf(stderr, "\"%s\" is not a valid command. For a list of commands use the option: --help or -h.\n", Command);
                 return EXIT_FAILURE;
             }
         }
