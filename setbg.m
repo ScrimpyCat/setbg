@@ -120,7 +120,7 @@ typedef enum {
 
 @end
 
-@interface SBGImage : NSView <SBGData, SBGDrawingOperation, NSCoding>
+@interface SBGImage : NSObject <SBGData, SBGDrawingOperation, NSCoding>
 
 @property SBGDrawingImageOperationOption drawingOption;
 @property CGSize overridenSize;
