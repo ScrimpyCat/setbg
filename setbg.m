@@ -60,6 +60,7 @@
 #import <Cocoa/Cocoa.h>
 
 #define SBGConnectionName @"setbgd" //Should we use reverse-DNS style naming?
+#define SBGAllScreens nil 
 
 typedef enum {
     SBGDrawOnce, //1,2,3,4 end
@@ -90,39 +91,60 @@ typedef enum {
 
 @protocol SBGDrawingOperation
 
-@property (retain) NSNumber *time;
+@property (copy) NSNumber *time;
 
--(void) drawInContext: (CGContextRef)ctx InRect: (CGRect)rect;
+@end
+
+@protocol SBGData
+
+-(NSView<SBGDrawingOperation>*) view;
 
 @end
 
 @interface SBGDaemon : NSView <NSApplicationDelegate>
 
 @property (retain) NSString *focusOnApp;
+
+-(void) setOperation: (NSArray*)op WithOption: (SBGDrawingOrder)option ApplyToScreens: (NSIndexSet*)indexSet;
+-(oneway void) kill;
+
+@end
+
+@interface SBGBackground : NSWindow
+
 @property SBGDrawingOrder drawingOrder;
 @property (retain) NSArray *operations;
 @property NSUInteger currentOperationIndex;
 
 -(void) setOperation: (NSArray*)op WithOption: (SBGDrawingOrder)option;
--(oneway void) kill;
 
 @end
 
-@interface SBGImage : NSObject <SBGDrawingOperation, NSCoding>
+@interface SBGImage : NSView <SBGData, SBGDrawingOperation, NSCoding>
 
 @property SBGDrawingImageOperationOption drawingOption;
 @property CGSize overridenSize;
 
 -(instancetype) initWithImageAtPath: (NSString*)img;
--(void) drawInContext: (CGContextRef)ctx InRect: (CGRect)rect;
+
+@end
+
+@interface SBGImageView : NSView <SBGDrawingOperation>
+
+@property SBGDrawingImageOperationOption drawingOption;
+@property CGSize overridenSize;
+
+-(instancetype) initWithImageAtPath: (NSString*)img;
 
 @end
 
 
 int main(int argc, char *argv[])
 {
-    SBGDaemon *Daemon = nil;
+    _Bool RunApp = NO;
+    
     @autoreleasepool {
+        SBGDaemon *Daemon = nil;
         _Bool Kill = NO, SetFocus = NO;
         NSString *FocusOnApp = nil;
         SBGDrawingOrder DrawOrder = SBGDrawOnce;
@@ -361,9 +383,14 @@ int main(int argc, char *argv[])
         {
             if (Kill) return EXIT_SUCCESS;
             
+            NSApplication *App = [NSApplication sharedApplication];
+            RunApp = YES;
+            
             Daemon = [SBGDaemon new];
-            Daemon.operations = DrawOperations;
-            Daemon.drawingOrder = DrawOrder;
+            [App setDelegate: Daemon];
+            
+            [Daemon setOperation: DrawOperations WithOption: DrawOrder ApplyToScreens: SBGAllScreens];
+            
             if (SetFocus) Daemon.focusOnApp = FocusOnApp;
         }
         
@@ -375,18 +402,13 @@ int main(int argc, char *argv[])
         else
         {
             SBGDaemon *Daemon = (SBGDaemon*)[DaemonConnection rootProxy];
-            [Daemon setOperation: DrawOperations WithOption: DrawOrder];
+            [Daemon setOperation: DrawOperations WithOption: DrawOrder ApplyToScreens: SBGAllScreens];
             if (SetFocus) Daemon.focusOnApp = FocusOnApp;
         }
     }
     
-    if (Daemon)
+    if (RunApp)
     {
-        //Set up application
-        NSApplication *App = [NSApplication sharedApplication];
-        
-        [App setDelegate: Daemon];
-        
         [NSApp run];
     }
     
@@ -394,32 +416,44 @@ int main(int argc, char *argv[])
 }
 
 
-
+#pragma mark - Daemon
 @interface SBGDaemon ()
 {
     CFMachPortRef tap;
     CFRunLoopSourceRef source;
 }
 
-@property (assign) NSWindow *window;
-
--(void) nextOperation: (NSTimer*)timer;
+@property (readonly) NSArray *backgrounds;
 
 @end
 
 @implementation SBGDaemon
 {
-    NSTimer *timer;
-    NSInteger direction;
     NSConnection *connection;
 }
-@synthesize operations,  currentOperationIndex, drawingOrder, window, focusOnApp;
+@synthesize backgrounds, focusOnApp;
 
 -(id) init
 {
     if ((self = [super init]))
     {
-        direction = 1;
+        NSArray *Screens = [NSScreen screens];
+        NSMutableArray *Backgrounds = [[NSMutableArray alloc] initWithCapacity: [Screens count]];
+        backgrounds = Backgrounds;
+        for (NSScreen *Screen in Screens)
+        {
+            CGRect Frame = [Screen frame]; Frame.origin = CGPointMake(0.0f, 0.0f);
+            SBGBackground *Window = [[[SBGBackground alloc] initWithContentRect: Frame styleMask: NSBorderlessWindowMask backing: NSBackingStoreBuffered defer: NO screen: Screen] autorelease];
+            
+            [Window setCollectionBehavior: NSWindowCollectionBehaviorCanJoinAllSpaces];
+            [Window setOpaque: YES];
+            [Window setBackgroundColor: [NSColor blackColor]];
+            [Window setContentView: self];
+            [Window setLevel: kCGDesktopWindowLevel];
+            [Window makeKeyAndOrderFront: nil];
+            
+            [Backgrounds addObject: Window];
+        }
     }
     
     return self;
@@ -465,20 +499,6 @@ static CGEventRef FocusEventTap(CGEventTapProxy proxy, CGEventType type, CGEvent
     [[NSDistributedNotificationCenter defaultCenter] addObserver: self selector: @selector(connectionDied:) name: NSConnectionDidDieNotification object: nil];
     
     
-    const NSRect Frame = [[NSScreen mainScreen] frame];
-    NSWindow *Window = [[NSWindow alloc] initWithContentRect: Frame styleMask: NSBorderlessWindowMask backing: NSBackingStoreBuffered defer: NO];
-    self.window = Window;
-    
-    [Window setCollectionBehavior: NSWindowCollectionBehaviorCanJoinAllSpaces];
-    [Window setOpaque: YES];
-    [Window setBackgroundColor: [NSColor blackColor]];
-    [Window setContentView: self];
-    [Window setLevel: kCGDesktopWindowLevel];
-    [Window makeKeyAndOrderFront: nil];
-    
-    self.frame = Frame;
-    
-    
     CGEventMask Mask = CGEventMaskBit(kCGEventLeftMouseDown) | CGEventMaskBit(kCGEventLeftMouseUp) | CGEventMaskBit(kCGEventRightMouseDown) | CGEventMaskBit(kCGEventRightMouseUp) | CGEventMaskBit(kCGEventLeftMouseDragged) | CGEventMaskBit(kCGEventOtherMouseDown) | CGEventMaskBit(kCGEventOtherMouseUp);
     
     ProcessSerialNumber PSN;
@@ -491,30 +511,92 @@ static CGEventRef FocusEventTap(CGEventTapProxy proxy, CGEventType type, CGEvent
     if (!self.focusOnApp) CGEventTapEnable(tap, FALSE);
 }
 
--(void) drawRect: (CGRect)dirtyRect
+static OSSpinLock FocusOnAppLock = OS_SPINLOCK_INIT;
+-(NSString*) focusOnApp
 {
-    @synchronized(self) {
-        NSArray *Operations = self.operations;
-        if (![Operations count]) return;
-        
-        id<SBGDrawingOperation> Op = [Operations objectAtIndex: self.currentOperationIndex];
-        NSNumber *Time = Op.time;
-        
-        if (Time)
+    NSString *Name = nil;
+    OSSpinLockLock(&FocusOnAppLock);
+    Name = [focusOnApp retain];
+    OSSpinLockUnlock(&FocusOnAppLock);
+    
+    return [Name autorelease];
+}
+
+-(void) setFocusOnApp: (NSString*)name
+{
+    OSSpinLockLock(&FocusOnAppLock);
+    [focusOnApp release];
+    focusOnApp = [name retain];
+    
+    if (tap) CGEventTapEnable(tap, name != nil);
+    OSSpinLockUnlock(&FocusOnAppLock);
+}
+
+-(void) setOperation: (NSArray*)op WithOption: (SBGDrawingOrder)option ApplyToScreens: (NSIndexSet*)indexSet;
+{
+    if (indexSet == SBGAllScreens)
+    {
+        for (SBGBackground *Background in self.backgrounds)
         {
-            [timer release];
-            timer = [[NSTimer timerWithTimeInterval: [Time doubleValue] target: self selector: @selector(nextOperation:) userInfo: nil repeats: NO] retain];
-            [[NSRunLoop mainRunLoop] addTimer: timer forMode: NSDefaultRunLoopMode];
+            [Background setOperation: op WithOption: option];
         }
-        
-        CGContextRef Ctx = [[NSGraphicsContext currentContext] graphicsPort];
-        CGContextClearRect(Ctx, dirtyRect);
-        [Op drawInContext: Ctx InRect: dirtyRect];
-        CGContextFlush(Ctx);
     }
 }
 
--(void) nextOperation: (NSTimer*)timer
+-(oneway void) kill
+{
+    [connection invalidate];
+    [NSApp terminate: self];
+}
+
+-(void) connectionDied: (NSNotification*)notification
+{
+    [NSApp terminate: self];
+}
+
+-(void) dealloc
+{
+    [connection invalidate];
+    [connection release]; connection = nil;
+    
+    CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, kCFRunLoopCommonModes);
+    CFRelease(source); source = NULL;
+    CFRelease(tap); tap = NULL;
+    
+    [focusOnApp release]; focusOnApp = nil;
+    [backgrounds release]; backgrounds = nil;
+    
+    [super dealloc];
+}
+
+@end
+
+
+#pragma mark - Screens
+@interface SBGBackground ()
+
+-(void) nextOperation: (NSTimer*)timer;
+
+@end
+
+@implementation SBGBackground
+{
+    NSTimer *timer;
+    NSInteger direction;
+}
+@synthesize operations,  currentOperationIndex, drawingOrder;
+
+-(id) initWithContentRect: (NSRect)contentRect styleMask: (NSUInteger)windowStyle backing: (NSBackingStoreType)bufferingType defer: (BOOL)deferCreation screen: (NSScreen*)screen
+{
+    if ((self = [super initWithContentRect: contentRect styleMask: windowStyle backing: bufferingType defer: deferCreation screen: screen]))
+    {
+        direction = 1;
+    }
+    
+    return self;
+}
+
+-(void) nextOperation: (NSTimer*)oldTimer
 {
     @synchronized(self) {
         NSArray *Operations = self.operations;
@@ -545,30 +627,41 @@ static CGEventRef FocusEventTap(CGEventTapProxy proxy, CGEventType type, CGEvent
         
         
         self.currentOperationIndex = Index;
+        
+        id<SBGDrawingOperation> Op = [Operations objectAtIndex: Index];
+        NSNumber *Time = Op.time;
+        
+        if (Time)
+        {
+            [timer release];
+            timer = [[NSTimer timerWithTimeInterval: [Time doubleValue] target: self selector: @selector(nextOperation:) userInfo: nil repeats: NO] retain];
+            [[NSRunLoop mainRunLoop] addTimer: timer forMode: NSDefaultRunLoopMode];
+        }
     }
     
-    [self setNeedsDisplay: YES];
+    [[self contentView] setNeedsDisplay: YES];
 }
 
-static OSSpinLock FocusOnAppLock = OS_SPINLOCK_INIT;
--(NSString*) focusOnApp
+-(NSUInteger) currentOperationIndex
 {
-    NSString *Name = nil;
-    OSSpinLockLock(&FocusOnAppLock);
-    Name = [focusOnApp retain];
-    OSSpinLockUnlock(&FocusOnAppLock);
-    
-    return [Name autorelease];
+    return currentOperationIndex;
 }
 
--(void) setFocusOnApp: (NSString*)name
+-(void) setCurrentOperationIndex: (NSUInteger)Index
 {
-    OSSpinLockLock(&FocusOnAppLock);
-    [focusOnApp release];
-    focusOnApp = [name retain];
+    currentOperationIndex = Index;
     
-    if (tap) CGEventTapEnable(tap, name != nil);
-    OSSpinLockUnlock(&FocusOnAppLock);
+    NSArray *Operations = self.operations;
+    if ([Operations count])
+    {
+        NSView *View = [self.operations objectAtIndex: Index];
+        
+        CGSize Size = [[self screen] frame].size;
+        View.frame = CGRectMake(0.0f, 0.0f, Size.width, Size.height);
+        [self setContentView: View];
+    }
+    
+    else [self setContentView: nil];
 }
 
 -(void) setOperation: (NSArray*)op WithOption: (SBGDrawingOrder)option;
@@ -580,43 +673,38 @@ static OSSpinLock FocusOnAppLock = OS_SPINLOCK_INIT;
             [timer release]; timer = nil;
         }
         
-        self.operations = op;
+        NSMutableArray *Views = [NSMutableArray arrayWithCapacity: [op count]];
+        for (id<SBGData> Data in op) [Views addObject: [Data view]];
+        
+        self.operations = Views;
         self.drawingOrder = option;
         self.currentOperationIndex = 0;
+        
+        if ([Views count])
+        {
+            id<SBGDrawingOperation> Op = [Views objectAtIndex: 0];
+            NSNumber *Time = Op.time;
+            
+            if (Time)
+            {
+                timer = [[NSTimer timerWithTimeInterval: [Time doubleValue] target: self selector: @selector(nextOperation:) userInfo: nil repeats: NO] retain];
+                [[NSRunLoop mainRunLoop] addTimer: timer forMode: NSDefaultRunLoopMode];
+            }
+        }
     }
     
-    [self setNeedsDisplay: YES];
-}
-
--(oneway void) kill
-{
-    [connection invalidate];
-    [NSApp terminate: self];
-}
-
--(void) connectionDied: (NSNotification*)notification
-{
-    [NSApp terminate: self];
+    [[self contentView] setNeedsDisplay: YES];
 }
 
 -(void) dealloc
 {
-    [connection invalidate];
-    [connection release]; connection = nil;
-    
     if (timer)
     {
         [timer invalidate];
         [timer release]; timer = nil;
     }
     
-    CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, kCFRunLoopCommonModes);
-    CFRelease(source); source = NULL;
-    CFRelease(tap); tap = NULL;
-    
-    [focusOnApp release]; focusOnApp = nil;
     [operations release]; operations = nil;
-    [window release]; window = nil;
     
     [super dealloc];
 }
@@ -624,18 +712,10 @@ static OSSpinLock FocusOnAppLock = OS_SPINLOCK_INIT;
 @end
 
 
-
-@interface SBGImage ()
-
--(CGPoint) offsetInRect: (CGRect)rect ForSize: (CGSize)size;
-
-@end
-
+#pragma mark - Data
 @implementation SBGImage
 {
     NSString *imagePath;
-    CGImageRef cachedImage;
-    CGRect cachedRect;
 }
 @synthesize time, drawingOption, overridenSize;
 
@@ -675,10 +755,58 @@ static OSSpinLock FocusOnAppLock = OS_SPINLOCK_INIT;
     [encoder encodeValueOfObjCType: @encode(CGSize) at: &overridenSize];
 }
 
--(void) drawInContext: (CGContextRef)ctx InRect: (CGRect)rect
+-(NSView<SBGDrawingOperation>*) view
+{
+    SBGImageView *ImageView = [[[SBGImageView alloc] initWithImageAtPath: imagePath] autorelease];
+    ImageView.time = self.time;
+    ImageView.drawingOption = self.drawingOption;
+    ImageView.overridenSize = self.overridenSize;
+    
+    return ImageView;
+}
+
+-(void) dealloc
+{
+    [imagePath release]; imagePath = nil;
+    [time release]; time = nil;
+    
+    [super dealloc];
+}
+
+@end
+
+
+#pragma mark - Views
+@interface SBGImageView ()
+
+-(CGPoint) offsetInRect: (CGRect)rect ForSize: (CGSize)size;
+
+@end
+
+@implementation SBGImageView
+{
+    NSString *imagePath;
+    CGImageRef cachedImage;
+    CGRect cachedRect;
+}
+@synthesize time, drawingOption, overridenSize;
+
+-(instancetype) initWithImageAtPath: (NSString*)img
+{
+    if ((self = [super init]))
+    {
+        imagePath = [img copy];
+    }
+    
+    return self;
+}
+
+-(void) drawRect: (CGRect)rect
 {
     const SBGDrawingImageOperationOption DrawOp = self.drawingOption;
-
+    CGContextRef ctx = [[NSGraphicsContext currentContext] graphicsPort];
+    CGContextClearRect(ctx, rect);
+    
     if (!cachedImage)
     {
         NSImage *Image = [[NSImage alloc] initByReferencingFile: imagePath];
@@ -831,6 +959,7 @@ static OSSpinLock FocusOnAppLock = OS_SPINLOCK_INIT;
     }
     
     ((DrawOp & SBGDrawOperationTypeMask) == SBGDrawOperationTypeSingle ? CGContextDrawImage : CGContextDrawTiledImage)(ctx, cachedRect, cachedImage);
+    CGContextFlush(ctx);
 }
 
 -(CGPoint) offsetInRect: (CGRect)rect ForSize: (CGSize)size

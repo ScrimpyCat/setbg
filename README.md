@@ -30,13 +30,9 @@ To-Do's
 -------
  * Support plugins, these will most likely be Quartz Compositions. The plugin support is for content that is beyond a simple image or needs to be controlled in a specific way.
 
- * (also a bug) The app will need to be applied to the full screen of all screens. At the moment it currently sets the size of the app to the screen size of the current screen, which obviously may not be the size of all screens.
-
  * Specify background for specific screens.
 
  * Separate some of the functionality so some options can be used as toggles not resetting the current content pipeline.
-
- * (also a bug) Images currently get cached to whatever size will make them consume the least amount of memory but still avoid any scaling up (if possible). So assume an input image is 300*300, and it will be drawn as fixed, while the destination screen is only 100*100, as only a portion of the image will be drawn it will simply cache that portion and release the rest (so it doesn't need to keep unused image data in memory). But at the moment it simply does it based on the destination rect which is the current view's rect, meaning when multiple screens are supported properly the fix here would be to see what is the biggest screen it could be applied to and use that as the destination rect for the caching.
 
  * Workout the Dock's default image positioning and sizing. So it can provide an exact copy of what would normally happen.
 
