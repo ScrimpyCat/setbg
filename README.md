@@ -18,13 +18,14 @@ Use --help or -h to get a list of commands. Will add the commands here later.
 Some examples:
 The order of commands can be thought of as as sequence of operations. Where the last set operation can then have additional options to define its usage.
 
-setbg -i img1.png (Sets the background to img1.png)
-setbg -i img1.png -isfixed (Sets the background to img1.png, without performing any resizing)
-setbg -i img1.png -isset 16 16 -offbl -tiled (Sets the background to img1.png sized at 16*16, which tiles across the screen starting at the bottom left corner)
-setbg -i img1.png -isset 16 16 -offbl (Sets the background to img1.png sized at 16*16, which originates at the bottom left corner)
-setbg -i img1.png -t 2 -i img2.png -t 2 -i img3.png -t 2 -r (Sets the background to img1.png for 2 seconds, then to img2.png for 2 seconds, then to img3.png for 2 seconds, then back to img1.png for 2 seconds, etc.)
-setbg -c comp1.qtz (Sets the background to the comp1 composition, defaulting to 30 frames per second)
-
+---
+	setbg -i img1.png (Sets the background to img1.png)
+	setbg -i img1.png -isfixed (Sets the background to img1.png, without performing any resizing)
+	setbg -i img1.png -isset 16 16 -offbl -tiled (Sets the background to img1.png sized at 16*16, which tiles across the screen starting at the bottom left corner)
+	setbg -i img1.png -isset 16 16 -offbl (Sets the background to img1.png sized at 16*16, which originates at the bottom left corner)
+	setbg -i img1.png -t 2 -i img2.png -t 2 -i img3.png -t 2 -r (Sets the background to img1.png for 2 seconds, then to img2.png for 2 seconds, then to img3.png for 2 seconds, then back to img1.png for 2 seconds, etc.)
+	setbg -c comp1.qtz (Sets the background to the comp1 composition, defaulting to 30 frames per second)
+---
 
 When changing the resolution you may want to set the background again. If adding or removing screens you will want to kill setbg and restart it.
 
